@@ -19,18 +19,26 @@
 ''		01	2015-04-08	First version
 '' 
 ''	SUBS AND FUNCTIONs:
+''		Function ConvertUsingLpr2skv
 ''		Function ExportEventsUsingLogparser
 ''		Function GetComputerName
 ''		Function GetFileSize
 ''		Function GetPathLastRun
+''		Function GetProgramPath
 ''		Function GetScriptPath
+''		Function GetUniqueFileName
 ''		Function IsThisScriptAlreadyRunning
+''		Function IsWriteAccessible
 ''		Function LastRunGet
 ''		Function LastRunPut
-''		Function GetUniqueFileName
 ''		Function NumberAlign
 ''		Function ProperDateTime
 ''		Function RunCommand
+''		Sub MoveExportFolderToCollectorDc
+''		Sub ProcessEventLog
+''		Sub MoveCollectorToSplunkServer
+''		
+''		Sub MakeFolder
 ''		Sub ScriptDone
 ''		Sub ScriptInit
 ''		Sub ScriptRun
@@ -51,9 +59,13 @@ Const 	FOR_READING =				1
 Const 	FOR_WRITING =				2
 Const	FOR_APPENDING =				8
 Const	EXTENSION_LPR = 			".lpr"
-Const	LOGPARSER_OK = 		0
+Const	EXTENSION_SKV = 			".skv"
+Const	LOGPARSER_OK = 				0
 Const	LOGPARSER_FAIL = 			1
 Const	LOGPARSER_SEPARATOR	=		"|"
+Const	SHARE_COLLECTOR = 			"\\NS00DC011.prod.ns.nl\000134-COLLECTOR"
+Const	SHARE_SKV = 				"\\vm70as006.rec.nsint\000134-SKV"
+Const	COLLECTOR_DC = 				"NS00DC011"
 
 ''	-----------------------------------------------------------------------------------------------
 ''	GLOBAL VARIABLES
@@ -74,17 +86,20 @@ Dim		gdtmInitLastRun
 ''	-----------------------------------------------------------------------------------------------
 
 
-Function GetUniqueFileName()
-	'
-	'	Generate a file name of hex numbers of length 32 chars.
-	'
-	'	First 12 digits are the current year, month, day, hour, minutes and seconds 
-	'	Extra unique chars to fill-up to 32 chars length.
-	'
-	'	Function does not add a extension to the file name.
-	'
-	'	Result: YYYYMMDDHHMMSS
-	'
+Function GetUniqueFileName(ByVal dt)
+	''
+	''	Generate a file name of hex numbers of length 32 chars.
+	''
+	''	First 12 digits are the current year, month, day, hour, minutes and seconds 
+	''	Extra unique chars to fill-up to 32 chars length.
+	'' 
+	'' 	Function does not add a extension to the file name.
+	''
+	''				12345678901234567890123456789012
+	''	strPrefix =	YYYYMMDDHHMMSS-xxxxxxxxxxxxxxxxx
+	''
+	''	dt:	Date Time of the last batch is done
+	''
 	
 	Const	UNIQUE_LEN =		32
 	Const	HEX_LEN	=			8
@@ -99,20 +114,15 @@ Function GetUniqueFileName()
 	Dim		intNumber
 	Dim		n
 	
-	dtmNow = Now()
+	'' Get the current date time.
+	''dtmNow = Now()
 	
-	''         123456789012345678901234567890123456789
-	'' Format: SYSTEMNAME-SEC-YYYYMMDD-HHMMSS-XXXXXXXX
-	
-	''				12345678901234567890123456789012
-	'' strPrefix =	YYYYMMDDHHMMSSxxxxxxxxxxxxxxxxxx
-	
-	''strPrefix = Left(strEventLogName, 3)
-	strPrefix = Year(dtmNow) & NumberAlign(Month(dtmNow), 2) & NumberAlign(Day(dtmNow), 2)
-	strPrefix = strPrefix & NumberAlign(Hour(dtmNow), 2) & NumberAlign(Minute(dtmNow), 2) & NumberAlign(Second(dtmNow), 2)
-	
-	'For i = 1 to HEX_LEN - Len(strPrefix)
-	
+	'' Make the prefix as YYYYMMDDHHMMSS.
+	strPrefix = Year(dt) & NumberAlign(Month(dt), 2) & NumberAlign(Day(dt), 2)
+	strPrefix = strPrefix & NumberAlign(Hour(dt), 2) & NumberAlign(Minute(dt), 2) & NumberAlign(Second(dt), 2)
+	strPrefix = strPrefix & "-"
+
+	'' Generate the fill string up to UNIQUE_LEN chars with a hex number.
 	For i = 1 to UNIQUE_LEN - Len(strPrefix)
 		Randomize
 		intNumber = Int((NUM_HIGH - NUM_LOW + 1) * Rnd + NUM_LOW)
@@ -195,6 +205,71 @@ End Function '' GetScriptPath()
 
 
 
+Function GetProgramPath(sProgName)
+	'==
+	'==	Locates a command line program in the path of the user,
+	'==	or in the current folder where the script is started.
+	'==
+	'==	Returns:
+	'==		Path to program when found
+	'==		Blank string when program is not found
+	'==
+	Dim	oShell
+	Dim	sEnvPath
+	Dim	oColVar
+	Dim	aPath
+	Dim	sScriptPath
+	Dim	sScriptName
+	Dim	x
+	Dim	oFso
+	Dim	sPath
+	Dim	sReturn
+
+	sReturn = ""
+
+	Set oFso = CreateObject("Scripting.FileSystemObject")
+	Set oShell = CreateObject("WScript.Shell")
+	
+	sScriptPath = WScript.ScriptFullName
+	sScriptName = WScript.ScriptName
+
+	sScriptPath = Left(sScriptPath, Len(sScriptPath) - Len(sScriptName))
+	
+	'=
+	'=	Build the path string like:
+	'=		folder;folder;folder;...
+	'=
+	'=	Place the current folder first in line. So it will find the file first when
+	'=	it is in the same folder as the script.
+	'=
+	sEnvPath = sScriptPath & ";" & oShell.ExpandEnvironmentStrings("%PATH%")
+	
+	'WScript.Echo sEnvPath
+	aPath = Split(sEnvPath, ";")
+	For x = 0 To UBound(aPath)
+		If Right(aPath(x), 1) <> "\" Then
+			aPath(x) = aPath(x) & "\"
+		End If
+		
+		'WScript.Echo x & ": " & aPath(x)
+		sPath = aPath(x) & sProgName
+		'WScript.Echo sPath
+		If oFso.FileExists(sPath) = True Then
+			sReturn = sPath
+			Exit For
+		End If
+	Next
+	
+	Set oShell = Nothing
+	Set oFso = Nothing
+	'= Return the string with double quotes enclosed. For paths with spaces.
+	'GetProgramPath = Chr(34) & sReturn & Chr(34)
+	'= 2011-02-16 Removed the Chr(34); was not working.
+	GetProgramPath = sReturn
+End Function '' of Function GetProgramPath
+
+
+
 Function GetPathLastRun(ByVal strComputerName, ByVal strEventLog)
 	''
 	''	Returns the path for the lastrun file (scriptpath\release\computer\last-run.txt)
@@ -206,7 +281,7 @@ Function GetPathLastRun(ByVal strComputerName, ByVal strEventLog)
 	GetPathLastRun = r
 End Function
 
-'	-----------------------------------------------------------------------------------------------
+
 
 Function LastRunGet(ByVal strComputerName, ByVal strEventLog)
 	'
@@ -324,7 +399,7 @@ Function ExportEventsUsingLogparser(ByVal strComputer, ByVal dtmLastRun, ByVal d
 	Dim		c
 	Dim		strPathExe
 	Dim		intReturn
-	
+	Dim		intFileSize
 	''Call LogWrite("--")
 	''Call LogWrite("ExportEventsUsingLogparser()")
 	
@@ -364,8 +439,9 @@ Function ExportEventsUsingLogparser(ByVal strComputer, ByVal dtmLastRun, ByVal d
 	r = RunCommand(c)
 	If r = 0 Then
 		''Call LogWrite("  SUCCESS: Logparser exported success full the events: r=" & r)
-		If GetFileSize(strPathLogparser) > 0 Then
-			WScript.Echo "  SUCCESS: File " & strPathLogparser & " contains data. intReturn=1"
+		intFileSize = GetFileSize(strPathLogparser)
+		If intFileSize > 0 Then
+			WScript.Echo "  SUCCESS: File " & strPathLogparser & " contains data, file size is " & intFileSize & " bytes"
 			intReturn = LOGPARSER_OK
 		Else
 			WScript.Echo "  WARNING: File " & strPathLogparser & " contains no data, deleting the this file"
@@ -378,6 +454,102 @@ Function ExportEventsUsingLogparser(ByVal strComputer, ByVal dtmLastRun, ByVal d
 	End If
 	ExportEventsUsingLogparser = intReturn
 End Function
+
+
+
+Function ConvertUsingLpr2skv(ByVal strPathLpr, ByVal strPathSkv)
+	Dim		c
+	Dim		r
+	Dim		el
+	Dim		intFileSize
+	
+	c = "lpr2skv.exe "
+	c = c & strPathLpr
+	
+	WScript.Echo
+	WScript.Echo c
+	WScript.Echo
+	
+	
+	el = RunCommand(c)
+	If el = 0 Then
+		intFileSize = GetFileSize(strPathSkv)
+		If intFileSize > 0 Then
+			WScript.Echo "Converted file "& strPathSkv & " contains " & intFileSize & " bytes"
+			r = 0
+		Else
+			WScript.Echo " ERROR: File conversion " & strPathLpr & " failed with code: " & el
+			r = 1
+		End If
+	Else
+		r = 1
+	End If
+	ConvertUsingLpr2skv = r
+End Function
+
+
+Function IsWriteAccessible(sFilePath)
+    ' Strategy: Attempt to open the specified file in 'append' mode.
+    ' Does not appear to change the 'modified' date on the file.
+    ' Works with binary files as well as text files.
+
+    ' Only 'ForAppending' is needed here. Define these constants
+    ' outside of this function if you need them elsewhere in
+    ' your source file.
+	'
+	' Source: http://stackoverflow.com/questions/12300678/how-can-i-determine-if-a-file-is-locked-using-vbs
+    Const ForReading = 1, ForWriting = 2, ForAppending = 8
+
+    IsWriteAccessible = False
+
+    Dim oFso : Set oFso = CreateObject("Scripting.FileSystemObject")
+
+    On Error Resume Next
+
+    Dim nErr : nErr = 0
+    Dim sDesc : sDesc = ""
+    Dim oFile : Set oFile = oFso.OpenTextFile(sFilePath, ForAppending)
+    If Err.Number = 0 Then
+        oFile.Close
+        If Err Then
+            nErr = Err.Number
+            sDesc = Err.Description
+        Else
+            IsWriteAccessible = True
+        End if
+    Else
+        Select Case Err.Number
+            Case 70
+                ' Permission denied because:
+                ' - file is open by another process
+                ' - read-only bit is set on file, *or*
+                ' - NTFS Access Control List settings (ACLs) on file
+                '   prevents access
+
+            Case Else
+                ' 52 - Bad file name or number
+                ' 53 - File not found
+                ' 76 - Path not found
+
+                nErr = Err.Number
+                sDesc = Err.Description
+        End Select
+    End If
+
+    ' The following two statements are superfluous. The VB6 garbage
+    ' collector will free 'oFile' and 'oFso' when this function completes
+    ' and they go out of scope. See Eric Lippert's article for more:
+    '   http://blogs.msdn.com/b/ericlippert/archive/2004/04/28/when-are-you-required-to-set-objects-to-nothing.aspx
+
+    'Set oFile = Nothing
+    'Set oFso = Nothing
+
+    On Error GoTo 0
+
+    If nErr Then
+        Err.Raise nErr, , sDesc
+    End If
+End Function '' of Function IsWriteAccessible
 
 
 
@@ -423,6 +595,80 @@ End Function ' IsThisScriptAlreadyRunning()
 ''	SUBS
 ''	-----------------------------------------------------------------------------------------------
 
+
+
+Sub MoveExportFolderToCollectorDc(ByVal strFolderSource)
+	''
+	''	Move all files in the local export folder to the collector share.
+	''
+
+	Dim		c
+	Dim		strFolderDest
+	Dim		el				' DOS Error Level
+	
+	
+	If UCase(gstrComputerName) <> UCase(COLLECTOR_DC) Then
+		WScript.Echo "This is not the Collector DC, MoveExportFolderToCollectorDc() must be run"
+	
+		strFolderDest = SHARE_COLLECTOR	
+	
+		'' Robocopy.exe options:
+		''		/z			Restartable
+		''		/mov		move files
+		''		/s			Copy subdirectories, but not empty ones.
+		''		/r:9 /w:10	Retry and Wait if failure
+		''		/np			Do no show process, skrews up your log
+		''		/copy:dt	copyflags : D=Data, A=Attributes, T=Timestamps
+	
+		c = "robocopy.exe "
+		c = c & Chr(34) & strFolderSource & Chr(34)
+		c = c & " " 
+		c = c & Chr(34) & strFolderDest & Chr(34)
+		c = c & " "
+		c = c & "*.*"
+		c = c & " "
+		c = c & "/e /z /mov /r:9 /w:10 /np /copy:dt /log:robocopy-move-to-collector.log"
+	
+		WScript.Echo c
+		el = RunCommand(c)
+		If el <= 8 Then
+			WScript.Echo "MoveExportFolderToCollectorDc() SUCCESS"
+		Else
+			WScript.Echo "MoveExportFolderToCollectorDc() ERROR: " & el
+		End If
+	End If
+End Sub '' of Sub MoveExportFolderToCollectorDc
+
+
+Sub MoveCollectorToSplunkServer(strFolderSource)
+	''
+	''	Move all files in the Collector share to the Splunk server.
+	''	
+	''	LPR > \\SPLUNKSERVER\000134-LPR
+	''	SKV > \\SPLUNKSERVER\000134-SKV
+	''
+	Dim		c
+	Dim		strFolderDest
+	Dim		el				' DOS Error Level
+	
+	
+	Dim		objFolder
+	Dim		colFiles
+	Dim		objFile
+	
+	WScript.Echo "MoveCollectorToSplunkServer()"
+	
+	If UCase(gstrComputerName) = UCase(COLLECTOR_DC) Then
+		WScript.Echo "This is the Collector DC, must run MoveCollectorToSplunkServer()"
+
+		Set objFolder = gobjFso.GetFolder(strFolderSource)
+	
+		Set colFiles = objFolder.Files
+		For Each objFile in colFiles
+			Wscript.Echo vbTab & objFile.Name & vbTab & "(" & objFile.Path & ")" & vbTab & IsWriteAccessible(objFile.Path)
+		Next
+	End If
+End Sub '' of Sub MoveCollectorToSplunkServer
 
 
 Sub MakeFolder(ByVal sNewFolder)
@@ -509,31 +755,49 @@ Sub MakeFolder(ByVal sNewFolder)
 		Next
 	End If
 	Set objFSO = Nothing
-End Sub '' of Sub bMakeFolder
+End Sub '' of Sub MakeFolder
 
 
 
 Sub ProcessEventLog(ByVal strEventLog)
-
 	Dim		dtmLastRun
 	Dim		dtmNow
 	Dim		strPathExport
 	Dim		strPathLpr
+	Dim		strPathSkv
 	
 	dtmLastRun = LastRunGet(gstrComputerName, strEventLog)
 	dtmNow = LastRunPut(gstrComputerName, strEventLog)
 	
 	strPathExport = GetScriptPath() & "\export"
-	strPathLpr = strPathExport & "\" & gstrComputerName & "\" & GetUniqueFileName & EXTENSION_LPR
+	strPathLpr = strPathExport & "\" & gstrComputerName & "\" & GetUniqueFileName(dtmLastRun) & EXTENSION_LPR
 
-	WScript.Echo "EventLog             : " & strEventLog
-	WScript.Echo "Computer             : " & gstrComputerName
-	WScript.Echo "Date time - previous : " & dtmLastRun
-	WScript.Echo "Date time - now      : " & dtmNow
-	WScript.Echo "Path export LPR      : " & strPathLpr
-	
+	WScript.Echo "Event Log                                : " & strEventLog
+	WScript.Echo "Computer                                 : " & gstrComputerName
+	WScript.Echo "Date time - last run                     : " & dtmLastRun
+	WScript.Echo "Date time - now                          : " & dtmNow
+	WScript.Echo "Path export LPR (date based on last run) : " & strPathLpr
+		
 	If ExportEventsUsingLogparser(gstrComputerName, dtmLastRun, dtmNow, strPathLpr) = LOGPARSER_OK Then
-		WScript.Echo "Convert the file " & strPathLpr
+		strPathSkv = Replace(strPathLpr, EXTENSION_LPR, EXTENSION_SKV)
+		If ConvertUsingLpr2skv(strPathLpr, strPathSkv) = 0 Then
+		
+			'' All DC's need to deliver their exports to the Collector DC
+			If UCase(gstrComputerName) <> UCase(COLLECTOR_DC) Then 
+				WScript.Echo "Move export files to the collector DC"
+				
+				Call MoveExportFolderToCollectorDc(strPathExport)
+				
+			End If
+			
+			If UCase(gstrComputerName) = UCase(COLLECTOR_DC) Then 
+				WScript.Echo "Move Collector files to REC Splunk server"
+				 Call MoveCollectorToSplunkServer(strPathExport)
+				
+			End If
+		Else
+			Script.Echo "ERROR conversion!!"
+		End If
 	Else
 		WScript.Echo "No export Logparser"
 	End If
@@ -548,6 +812,16 @@ Sub ScriptInit()
 		WScript.Quit(0)
 	End If
 
+	If Len(GetProgramPath("robocopy.exe")) = 0 Then
+		WScript.Echo "WARNING: Could not find robocopy.exe, stopping this instance!"
+		WScript.Quit(0)
+	End If
+
+	If Len(GetProgramPath("lpr2skv.exe")) = 0 Then
+		WScript.Echo "WARNING: Could not find lpr2skv.exe, stopping this instance!"
+		WScript.Quit(0)
+	End If
+	
 	Set gobjFso = CreateObject("Scripting.FileSystemObject")
 	
 	gstrComputerName = GetComputerName()
