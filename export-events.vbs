@@ -21,6 +21,7 @@
 ''	SUBS AND FUNCTIONs:
 ''		Function ConvertUsingLpr2skv
 ''		Function DoesShareExits
+''		Function GetRandomCharString
 ''		Function ExportEventsUsingLogparser
 ''		Function GetComputerName
 ''		Function GetFileSize
@@ -87,6 +88,30 @@ Dim		gdtmInitLastRun
 ''	FUNCTIONS
 ''	-----------------------------------------------------------------------------------------------
 
+Function GetRandomCharString(ByVal intLen)
+	''
+	''	Returns a string of random chars of intLen length.
+	'' 	                           12345678901234567890
+	''	GetRandomCharString(20) >> 12ghyUjHsdbeH5fDsYt6
+	''
+	
+	Dim		strValidChars	'' String with valid chars
+	Dim		i				'' Random position of strValidChars
+	Dim		r				'' Function return value
+	Dim		x				'' Loop counter
+	
+	strValidChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz"
+	
+	For x = 1 to intLen
+		Randomize
+		'' intNumber = Int(1 - Len(strValidChars) * Rnd + 1)
+		i = Int(Len(strValidChars) * Rnd + 1)
+		
+		r = r & Mid(strValidChars, i, 1)
+	Next
+	GetRandomCharString = r
+End Function '' of Function GetRandomCharString
+
 
 Function GetUniqueFileName(ByVal dt)
 	''
@@ -125,13 +150,13 @@ Function GetUniqueFileName(ByVal dt)
 	strPrefix = strPrefix & "-"
 
 	'' Generate the fill string up to UNIQUE_LEN chars with a hex number.
-	For i = 1 to UNIQUE_LEN - Len(strPrefix)
-		Randomize
-		intNumber = Int((NUM_HIGH - NUM_LOW + 1) * Rnd + NUM_LOW)
-		strFilename = strFilename & LCase(Hex(intNumber))
-	Next
+	'For i = 1 to UNIQUE_LEN - Len(strPrefix)
+	'	Randomize
+	'	intNumber = Int((NUM_HIGH - NUM_LOW + 1) * Rnd + NUM_LOW)
+	'	strFilename = strFilename & LCase(Hex(intNumber))
+	'Next
 	
-	GetUniqueFileName = strPrefix & strFilename
+	GetUniqueFileName = strPrefix & GetRandomCharString(UNIQUE_LEN - Len(strPrefix))
 End Function ' GetUniqueFileName
 
 
