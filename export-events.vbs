@@ -120,7 +120,7 @@ Function GetUniqueFileName(ByVal dt)
 	''dtmNow = Now()
 	
 	'' Make the prefix as YYYYMMDDHHMMSS.
-	strPrefix = Year(dt) & NumberAlign(Month(dt), 2) & NumberAlign(Day(dt), 2)
+	strPrefix = Year(dt) & NumberAlign(Month(dt), 2) & NumberAlign(Day(dt), 2) & "-"
 	strPrefix = strPrefix & NumberAlign(Hour(dt), 2) & NumberAlign(Minute(dt), 2) & NumberAlign(Second(dt), 2)
 	strPrefix = strPrefix & "-"
 
