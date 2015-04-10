@@ -20,6 +20,7 @@
 '' 
 ''	SUBS AND FUNCTIONs:
 ''		Function ConvertUsingLpr2skv
+''		Function DoesShareExits
 ''		Function ExportEventsUsingLogparser
 ''		Function GetComputerName
 ''		Function GetFileSize
@@ -32,13 +33,13 @@
 ''		Function LastRunGet
 ''		Function LastRunPut
 ''		Function NumberAlign
+''		Function ProperDateFs
 ''		Function ProperDateTime
 ''		Function RunCommand
+''		Sub MakeFolder
+''		Sub MoveCollectorToSplunkServer
 ''		Sub MoveExportFolderToCollectorDc
 ''		Sub ProcessEventLog
-''		Sub MoveCollectorToSplunkServer
-''		
-''		Sub MakeFolder
 ''		Sub ScriptDone
 ''		Sub ScriptInit
 ''		Sub ScriptRun
@@ -63,9 +64,10 @@ Const	EXTENSION_SKV = 			".skv"
 Const	LOGPARSER_OK = 				0
 Const	LOGPARSER_FAIL = 			1
 Const	LOGPARSER_SEPARATOR	=		"|"
-Const	SHARE_COLLECTOR = 			"\\NS00DC011.prod.ns.nl\000134-COLLECTOR"
 Const	SHARE_SKV = 				"\\vm70as006.rec.nsint\000134-SKV"
+Const	SHARE_LPR = 				"\\vm70as006.rec.nsint\000134-LPR"
 Const	COLLECTOR_DC = 				"NS00DC011"
+Const	COLLECTOR_SHARE = 			"000134-COLLECTOR"
 
 ''	-----------------------------------------------------------------------------------------------
 ''	GLOBAL VARIABLES
@@ -488,6 +490,40 @@ Function ConvertUsingLpr2skv(ByVal strPathLpr, ByVal strPathSkv)
 End Function
 
 
+
+Function DoesShareExist(ByVal strShareName)
+	''
+	''	Check if a share exists on the computer
+	''
+	''	Source: http://stackoverflow.com/questions/7980214/check-if-share-exists-if-so-then-continue
+	''
+	Dim		strComputer
+	Dim		objWMIService
+	Dim		colShares
+	Dim		objShare
+	Dim		r
+
+	r = False
+	
+	strComputer = "."
+	
+	Set objWMIService = GetObject("winmgmts:" _
+     & "{impersonationLevel=impersonate}!\\" & strComputer & "\root\cimv2")
+
+	Set colShares = objWMIService.ExecQuery("Select * from Win32_Share Where Name = '" & strShareName & "'")
+
+	For each objShare in colShares
+		
+		If (Err.Number <> 0) Then 
+			r = False '' strShareName share does not exists.
+		Else 
+			r = True '' strShareName share exists.
+		End If 
+	Next
+	DoesShareExist = r
+End Function '' of Function DoesShareExist
+
+
 Function IsWriteAccessible(sFilePath)
     ' Strategy: Attempt to open the specified file in 'append' mode.
     ' Does not appear to change the 'modified' date on the file.
@@ -553,6 +589,46 @@ End Function '' of Function IsWriteAccessible
 
 
 
+Function ProperDateFs(ByVal dtmDateTime, ByVal blnFolder3)
+	''
+	''	Convert a system formatted date time to a proper file system date time
+	''
+	''	Returns the current date time when no date time is specified by dtmDateTime
+	''
+	''	Returns a date time in format: YYYY-MM-DD
+	''
+	''	dtmDateTime 
+	''
+	''	blnFolder3
+	''		True: 	Uses '\' as the separator char in the date: YYYY\MM\DD
+	''		False:	Uses '-' as the separator char in the date: YYYY-MM-DD
+	''
+	Dim		strSeperator
+	Dim		strResult
+
+
+	strResult = ""
+	
+	If blnFolder3 = True Then
+		strSeperator = "\"
+	Else
+		strSeperator = "-"
+	End If
+	
+	If Len(dtmDateTime) = 0 Then
+		dtmDateTime = Now()
+	End If
+	
+	strResult = NumberAlign(Year(dtmDateTime), 4) & strSeperator 
+	strResult = strResult & NumberAlign(Month(dtmDateTime), 2) & strSeperator
+	strResult = strResult & NumberAlign(Day(dtmDateTime), 2)
+	
+	ProperDateFs = strResult
+End Function '' of Function ProperDateFS
+
+
+
+
 Function IsThisScriptAlreadyRunning()
 	'
 	'	Check in the process list if there is another instance of this script running.
@@ -595,80 +671,6 @@ End Function ' IsThisScriptAlreadyRunning()
 ''	SUBS
 ''	-----------------------------------------------------------------------------------------------
 
-
-
-Sub MoveExportFolderToCollectorDc(ByVal strFolderSource)
-	''
-	''	Move all files in the local export folder to the collector share.
-	''
-
-	Dim		c
-	Dim		strFolderDest
-	Dim		el				' DOS Error Level
-	
-	
-	If UCase(gstrComputerName) <> UCase(COLLECTOR_DC) Then
-		WScript.Echo "This is not the Collector DC, MoveExportFolderToCollectorDc() must be run"
-	
-		strFolderDest = SHARE_COLLECTOR	
-	
-		'' Robocopy.exe options:
-		''		/z			Restartable
-		''		/mov		move files
-		''		/s			Copy subdirectories, but not empty ones.
-		''		/r:9 /w:10	Retry and Wait if failure
-		''		/np			Do no show process, skrews up your log
-		''		/copy:dt	copyflags : D=Data, A=Attributes, T=Timestamps
-	
-		c = "robocopy.exe "
-		c = c & Chr(34) & strFolderSource & Chr(34)
-		c = c & " " 
-		c = c & Chr(34) & strFolderDest & Chr(34)
-		c = c & " "
-		c = c & "*.*"
-		c = c & " "
-		c = c & "/e /z /mov /r:9 /w:10 /np /copy:dt /log:robocopy-move-to-collector.log"
-	
-		WScript.Echo c
-		el = RunCommand(c)
-		If el <= 8 Then
-			WScript.Echo "MoveExportFolderToCollectorDc() SUCCESS"
-		Else
-			WScript.Echo "MoveExportFolderToCollectorDc() ERROR: " & el
-		End If
-	End If
-End Sub '' of Sub MoveExportFolderToCollectorDc
-
-
-Sub MoveCollectorToSplunkServer(strFolderSource)
-	''
-	''	Move all files in the Collector share to the Splunk server.
-	''	
-	''	LPR > \\SPLUNKSERVER\000134-LPR
-	''	SKV > \\SPLUNKSERVER\000134-SKV
-	''
-	Dim		c
-	Dim		strFolderDest
-	Dim		el				' DOS Error Level
-	
-	
-	Dim		objFolder
-	Dim		colFiles
-	Dim		objFile
-	
-	WScript.Echo "MoveCollectorToSplunkServer()"
-	
-	If UCase(gstrComputerName) = UCase(COLLECTOR_DC) Then
-		WScript.Echo "This is the Collector DC, must run MoveCollectorToSplunkServer()"
-
-		Set objFolder = gobjFso.GetFolder(strFolderSource)
-	
-		Set colFiles = objFolder.Files
-		For Each objFile in colFiles
-			Wscript.Echo vbTab & objFile.Name & vbTab & "(" & objFile.Path & ")" & vbTab & IsWriteAccessible(objFile.Path)
-		Next
-	End If
-End Sub '' of Sub MoveCollectorToSplunkServer
 
 
 Sub MakeFolder(ByVal sNewFolder)
@@ -758,6 +760,163 @@ Sub MakeFolder(ByVal sNewFolder)
 End Sub '' of Sub MakeFolder
 
 
+Sub ExtractFilePerEvent(ByVal strFolderExportTo, ByVal strPathLpr)
+	''
+	''	TEST 
+	'' 
+	''	Extract a file per event
+	''
+	Dim		objFile
+	Dim		objFileEvent
+	Dim		strLine
+	Dim		arrLine
+	Dim		strEvent
+	Dim		strPathEvent
+	Dim		x
+	
+	Set objFile = gobjFso.OpenTextFile(strPathLpr, FOR_READING)
+	
+	strPathEvent = strFolderExportTo
+	
+	'strLine = ProperDateTime(objFile.ReadLine)
+
+	Do While objFile.AtEndOfStream = False
+		strLine = objFile.ReadLine
+		'WScript.Echo strLine
+		arrLine = Split(strLine, "|")
+		
+		strEvent = arrLine(1)
+		
+		strPathEvent = strFolderExportTo & "\event-" & strEvent & ".lpr"
+		If gobjFso.FileExists(strPathEvent) = False Then
+			'' Write the event line to a file
+			'WScript.Echo "Writing to " & strPathEvent & ": " & strLine
+		
+			Set objFileEvent = gobjFso.OpenTextFile(strPathEvent, FOR_WRITING, True)
+			
+			objFileEvent.WriteLine strLine
+			
+			objFileEvent.WriteLine
+			
+			For x = 0 To UBound(arrLine)
+				'WScript.Echo x & vbTab & arrLine(x)
+				objFileEvent.WriteLine x & vbTab & arrLine(x)
+			Next
+			
+			objFileEvent.Close
+			Set objFileEvent = Nothing
+		End If
+		
+	Loop
+	objFile.Close
+	Set objFile = Nothing	
+End Sub '' of Sub ExtractFilePerEvent
+
+
+
+Sub MoveExportFolderToCollectorDc(ByVal strFolderSource)
+	''
+	''	Move all files in the local export folder to the collector share.
+	''
+
+	Dim		c
+	Dim		strFolderDest
+	Dim		el				' DOS Error Level
+	
+	
+	strFolderDest = "\\" & COLLECTOR_DC	& "\" & COLLECTOR_SHARE
+	
+	'' Robocopy.exe options:
+	''		/z			Restartable
+	''		/mov		move files
+	''		/s			Copy subdirectories, but not empty ones.
+	''		/r:9 /w:10	Retry and Wait if failure
+	''		/np			Do no show process, skrews up your log
+	''		/copy:dt	copyflags : D=Data, A=Attributes, T=Timestamps
+	
+	c = "robocopy.exe "
+	c = c & Chr(34) & strFolderSource & Chr(34)
+	c = c & " " 
+	c = c & Chr(34) & strFolderDest & Chr(34)
+	c = c & " "
+	c = c & "*.*"
+	c = c & " "
+	c = c & "/e /z /mov /r:9 /w:10 /np /copy:dt /log:robocopy-collector.log"
+	
+	WScript.Echo c
+	el = RunCommand(c)
+	If el <= 8 Then
+		WScript.Echo "MoveExportFolderToCollectorDc() SUCCESS"
+	Else
+		WScript.Echo "MoveExportFolderToCollectorDc() ERROR: " & el
+	End If
+End Sub '' of Sub MoveExportFolderToCollectorDc
+
+
+
+Sub MoveCollectorToSplunkServer(strFolderSource)
+	''
+	''	Move all files in the Collector share to the Splunk server.
+	''	
+	''	LPR > \\SPLUNKSERVER\000134-LPR
+	''	SKV > \\SPLUNKSERVER\000134-SKV
+	''
+	Dim		c
+	Dim		strFolderDest
+	Dim		el				' DOS Error Level
+	
+	
+	'Dim		objFolder
+	'Dim		colFiles
+	'Dim		objFile
+	'Dim		colSubFolders
+	'Dim		objSubFolder
+	
+	'' First move the SKV files to the SKV share on the Splunk server.
+	
+	WScript.Echo "MoveCollectorToSplunkServer(): Move the " & EXTENSION_SKV
+	
+	c = "robocopy.exe "
+	c = c & Chr(34) & strFolderSource & Chr(34)
+	c = c & " " 
+	c = c & Chr(34) & SHARE_SKV & "\" & ProperDateFs(Now(), False) & Chr(34) 
+	c = c & " "
+	c = c & "*" & EXTENSION_SKV
+	c = c & " "
+	c = c & "/e /z /mov /r:9 /w:10 /np /copy:dt /log:robocopy-skv.log"
+	
+	WScript.Echo c
+	el = RunCommand(c)
+	If el <= 8 Then
+		WScript.Echo "MoveExportFolderToCollectorDc() SUCCESS"
+	Else
+		WScript.Echo "MoveExportFolderToCollectorDc() ERROR: " & el
+	End If
+	
+	
+	
+	WScript.Echo "MoveCollectorToSplunkServer(): Move the " & EXTENSION_LPR
+	
+	c = "robocopy.exe "
+	c = c & Chr(34) & strFolderSource & Chr(34)
+	c = c & " " 
+	c = c & Chr(34) & SHARE_LPR & "\" & ProperDateFs(Now(), False) & Chr(34)
+	c = c & " "
+	c = c & "*" & EXTENSION_LPR
+	c = c & " "
+	c = c & "/e /z /mov /r:9 /w:10 /np /copy:dt /log:robocopy-lpr.log"
+	
+	WScript.Echo c
+
+	el = RunCommand(c)
+	If el <= 8 Then
+		WScript.Echo "MoveExportFolderToCollectorDc() SUCCESS"
+	Else
+		WScript.Echo "MoveExportFolderToCollectorDc() ERROR: " & el
+	End If
+End Sub '' of Sub MoveCollectorToSplunkServer
+
+
 
 Sub ProcessEventLog(ByVal strEventLog)
 	Dim		dtmLastRun
@@ -772,10 +931,10 @@ Sub ProcessEventLog(ByVal strEventLog)
 	strPathExport = GetScriptPath() & "\export"
 	strPathLpr = strPathExport & "\" & gstrComputerName & "\" & GetUniqueFileName(dtmLastRun) & EXTENSION_LPR
 
-	WScript.Echo "Event Log                                : " & strEventLog
-	WScript.Echo "Computer                                 : " & gstrComputerName
-	WScript.Echo "Date time - last run                     : " & dtmLastRun
-	WScript.Echo "Date time - now                          : " & dtmNow
+	WScript.Echo "                               Event Log : " & strEventLog
+	WScript.Echo "                                Computer : " & gstrComputerName
+	WScript.Echo "                    Date time - last run : " & dtmLastRun
+	WScript.Echo "                         Date time - now : " & dtmNow
 	WScript.Echo "Path export LPR (date based on last run) : " & strPathLpr
 		
 	If ExportEventsUsingLogparser(gstrComputerName, dtmLastRun, dtmNow, strPathLpr) = LOGPARSER_OK Then
@@ -783,18 +942,31 @@ Sub ProcessEventLog(ByVal strEventLog)
 		If ConvertUsingLpr2skv(strPathLpr, strPathSkv) = 0 Then
 		
 			'' All DC's need to deliver their exports to the Collector DC
-			If UCase(gstrComputerName) <> UCase(COLLECTOR_DC) Then 
-				WScript.Echo "Move export files to the collector DC"
-				
-				Call MoveExportFolderToCollectorDc(strPathExport)
-				
-			End If
+			'If UCase(gstrComputerName) <> UCase(COLLECTOR_DC) Then 
+				'WScript.Echo "Move export files to the collector DC"
+				'Call MoveExportFolderToCollectorDc(strPathExport)
+			'End If
 			
-			If UCase(gstrComputerName) = UCase(COLLECTOR_DC) Then 
-				WScript.Echo "Move Collector files to REC Splunk server"
-				 Call MoveCollectorToSplunkServer(strPathExport)
+			Call ExtractFilePerEvent(strPathExport & "\" & gstrComputerName, strPathLpr)
+			
+			
+			
+			If DoesShareExist(COLLECTOR_SHARE) = True Then
+				'' Actions that need to be done by the Collector DC
+				WScript.Echo "This is the Collector DC, found the " & COLLECTOR_SHARE & " share."
 				
+				Call MoveCollectorToSplunkServer(strPathExport)
+				
+			Else
+				'' Actions that need to be done by the 
+				WScript.Echo "This is not the Collector DC, move files to Collector DC " & COLLECTOR_DC
+				Call MoveExportFolderToCollectorDc(strPathExport)
 			End If
+
+			' If UCase(gstrComputerName) = UCase(COLLECTOR_DC) Then 
+				'WScript.Echo "Move Collector files to REC Splunk server"
+				 'Call MoveCollectorToSplunkServer(strPathExport)
+			' End If
 		Else
 			Script.Echo "ERROR conversion!!"
 		End If
