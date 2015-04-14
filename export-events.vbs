@@ -333,7 +333,7 @@ Function LastRunGet(ByVal strComputerName, ByVal strEventLog)
 		'' Create the file and return strLine value which contains a date time 5 mins ago.
 		
 		Set objFile = gobjFso.OpenTextFile(strPath, FOR_WRITING, True)
-		r = ProperDateTime(DateAdd("m", -5, Now()))
+		r = ProperDateTime(DateAdd("h", -1, Now())) 'V02: Just go back 1 hour when a new file is created
 		objFile.WriteLine r
 		objFile.Close
 		Set objFile = Nothing
@@ -498,7 +498,6 @@ Function ConvertUsingLpr2skv(ByVal strPathLpr, ByVal strPathSkv)
 	WScript.Echo
 	WScript.Echo c
 	WScript.Echo
-	
 	
 	el = RunCommand(c)
 	If el = 0 Then
@@ -913,8 +912,6 @@ Sub ProcessEventLog(ByVal strEventLog)
 			
 			Call ExtractFilePerEvent(strPathExport & "\" & gstrComputerName, strPathLpr)
 			
-			
-			
 			If DoesShareExist(COLLECTOR_SHARE) = True Then
 				'' Actions that need to be done by the Collector DC
 				WScript.Echo "This is the Collector DC, found the " & COLLECTOR_SHARE & " share."
@@ -932,7 +929,7 @@ Sub ProcessEventLog(ByVal strEventLog)
 				 'Call MoveCollectorToSplunkServer(strPathExport)
 			' End If
 		Else
-			Script.Echo "ERROR conversion!!"
+			WScript.Echo "ERROR conversion!!"
 		End If
 	Else
 		WScript.Echo "No export Logparser"
