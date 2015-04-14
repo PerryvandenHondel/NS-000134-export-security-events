@@ -16,6 +16,8 @@
 ''
 ''
 ''	VERSION:
+''		02	2015-04-14	Modification:
+''						1) Do not export computer accounts, use LPR2SKV.EXE options --skip-computer-account
 ''		01	2015-04-08	First version
 '' 
 ''	SUBS AND FUNCTIONs:
@@ -30,7 +32,6 @@
 ''		Function GetScriptPath
 ''		Function GetUniqueFileName
 ''		Function IsThisScriptAlreadyRunning
-''		Function IsWriteAccessible
 ''		Function LastRunGet
 ''		Function LastRunPut
 ''		Function NumberAlign
@@ -491,7 +492,8 @@ Function ConvertUsingLpr2skv(ByVal strPathLpr, ByVal strPathSkv)
 	Dim		intFileSize
 	
 	c = "lpr2skv.exe "
-	c = c & strPathLpr
+	c = c & Chr(34) & strPathLpr & Chr(34) & " "
+	c = c & "--skip-computer-account" '' V02: Added --skip-computer-account
 	
 	WScript.Echo
 	WScript.Echo c
@@ -547,70 +549,6 @@ Function DoesShareExist(ByVal strShareName)
 	Next
 	DoesShareExist = r
 End Function '' of Function DoesShareExist
-
-
-Function IsWriteAccessible(sFilePath)
-    ' Strategy: Attempt to open the specified file in 'append' mode.
-    ' Does not appear to change the 'modified' date on the file.
-    ' Works with binary files as well as text files.
-
-    ' Only 'ForAppending' is needed here. Define these constants
-    ' outside of this function if you need them elsewhere in
-    ' your source file.
-	'
-	' Source: http://stackoverflow.com/questions/12300678/how-can-i-determine-if-a-file-is-locked-using-vbs
-    Const ForReading = 1, ForWriting = 2, ForAppending = 8
-
-    IsWriteAccessible = False
-
-    Dim oFso : Set oFso = CreateObject("Scripting.FileSystemObject")
-
-    On Error Resume Next
-
-    Dim nErr : nErr = 0
-    Dim sDesc : sDesc = ""
-    Dim oFile : Set oFile = oFso.OpenTextFile(sFilePath, ForAppending)
-    If Err.Number = 0 Then
-        oFile.Close
-        If Err Then
-            nErr = Err.Number
-            sDesc = Err.Description
-        Else
-            IsWriteAccessible = True
-        End if
-    Else
-        Select Case Err.Number
-            Case 70
-                ' Permission denied because:
-                ' - file is open by another process
-                ' - read-only bit is set on file, *or*
-                ' - NTFS Access Control List settings (ACLs) on file
-                '   prevents access
-
-            Case Else
-                ' 52 - Bad file name or number
-                ' 53 - File not found
-                ' 76 - Path not found
-
-                nErr = Err.Number
-                sDesc = Err.Description
-        End Select
-    End If
-
-    ' The following two statements are superfluous. The VB6 garbage
-    ' collector will free 'oFile' and 'oFso' when this function completes
-    ' and they go out of scope. See Eric Lippert's article for more:
-    '   http://blogs.msdn.com/b/ericlippert/archive/2004/04/28/when-are-you-required-to-set-objects-to-nothing.aspx
-
-    'Set oFile = Nothing
-    'Set oFso = Nothing
-
-    On Error GoTo 0
-
-    If nErr Then
-        Err.Raise nErr, , sDesc
-    End If
-End Function '' of Function IsWriteAccessible
 
 
 
@@ -812,6 +750,9 @@ Sub ExtractFilePerEvent(ByVal strFolderExportTo, ByVal strPathLpr)
 		
 		strEvent = arrLine(1)
 		
+		
+		
+		
 		strPathEvent = strFolderExportTo & "\event-" & strEvent & ".lpr"
 		If gobjFso.FileExists(strPathEvent) = False Then
 			'' Write the event line to a file
@@ -918,8 +859,6 @@ Sub MoveCollectorToSplunkServer(strFolderSource)
 		WScript.Echo "MoveExportFolderToCollectorDc() ERROR: " & el
 	End If
 	
-	
-	
 	WScript.Echo "MoveCollectorToSplunkServer(): Move the " & EXTENSION_LPR
 	
 	c = "robocopy.exe "
@@ -956,11 +895,11 @@ Sub ProcessEventLog(ByVal strEventLog)
 	strPathExport = GetScriptPath() & "\export"
 	strPathLpr = strPathExport & "\" & gstrComputerName & "\" & GetUniqueFileName(dtmLastRun) & EXTENSION_LPR
 
-	WScript.Echo "                               Event Log : " & strEventLog
-	WScript.Echo "                                Computer : " & gstrComputerName
-	WScript.Echo "                    Date time - last run : " & dtmLastRun
-	WScript.Echo "                         Date time - now : " & dtmNow
-	WScript.Echo "Path export LPR (date based on last run) : " & strPathLpr
+	WScript.Echo "Event Log            : " & strEventLog
+	WScript.Echo "Computer             : " & gstrComputerName
+	WScript.Echo "Date time - last run : " & dtmLastRun
+	WScript.Echo "Date time - now      : " & dtmNow
+	WScript.Echo "Path export LPR      : " & strPathLpr
 		
 	If ExportEventsUsingLogparser(gstrComputerName, dtmLastRun, dtmNow, strPathLpr) = LOGPARSER_OK Then
 		strPathSkv = Replace(strPathLpr, EXTENSION_LPR, EXTENSION_SKV)
