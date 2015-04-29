@@ -16,6 +16,8 @@
 ''
 ''
 ''	VERSION:
+''		03	2015-04-28	Modifications:
+''						1) All servers can now directly contact the Splunk server using SMB shares. No need to use a collector dc anymore.
 ''		02	2015-04-14	Modification:
 ''						1) Do not export computer accounts, use LPR2SKV.EXE options --skip-computer-account
 ''		01	2015-04-08	First version
@@ -38,6 +40,7 @@
 ''		Function ProperDateFs
 ''		Function ProperDateTime
 ''		Function RunCommand
+''		Sub DeleteFile()
 ''		Sub MakeFolder
 ''		Sub MoveCollectorToSplunkServer
 ''		Sub MoveExportFolderToCollectorDc
@@ -415,6 +418,7 @@ Function GetFileSize(ByVal sFName)
 End Function
 
 
+
 Function ExportEventsUsingLogparser(ByVal strComputer, ByVal dtmLastRun, ByVal dtmNow, ByVal strPathLogparser)
 	''
 	''	Export the events to a temp file specified in strPathLogparser
@@ -635,6 +639,25 @@ End Function ' IsThisScriptAlreadyRunning()
 
 
 
+Sub DeleteFile(sPath)
+	''
+	''	DeleteFile()
+	''	
+	''	Delete a file specified as "d:\folder\filename.ext"
+	''
+	''	sPath	The name of the file to delete.
+	''
+   	Dim oFSO
+   	
+   	Set oFSO = CreateObject("Scripting.FileSystemObject")
+   	If oFSO.FileExists(sPath) Then
+   		oFSO.DeleteFile sPath, True
+   	End If
+   	Set oFSO = Nothing
+End Sub '' DeleteFile
+
+
+
 Sub MakeFolder(ByVal sNewFolder)
 	'
 	'	Create a folder structure when it doesn't exist.
@@ -720,6 +743,7 @@ Sub MakeFolder(ByVal sNewFolder)
 	End If
 	Set objFSO = Nothing
 End Sub '' of Sub MakeFolder
+
 
 
 Sub ExtractFilePerEvent(ByVal strFolderExportTo, ByVal strPathLpr)
@@ -819,7 +843,7 @@ End Sub '' of Sub MoveExportFolderToCollectorDc
 
 
 
-Sub MoveCollectorToSplunkServer(strFolderSource)
+Sub MoveExportFolderToSplunkServer(strFolderSource)
 	''
 	''	Move all files in the Collector share to the Splunk server.
 	''	
@@ -838,8 +862,8 @@ Sub MoveCollectorToSplunkServer(strFolderSource)
 	'Dim		objSubFolder
 	
 	'' First move the SKV files to the SKV share on the Splunk server.
-	
-	WScript.Echo "MoveCollectorToSplunkServer(): Move the " & EXTENSION_SKV
+	WScript.Echo "MoveExportFolderToSplunkServer()"
+	WScript.Echo vbTab & "Move the " & EXTENSION_SKV & " files."
 	
 	c = "robocopy.exe "
 	c = c & Chr(34) & strFolderSource & Chr(34)
@@ -853,13 +877,14 @@ Sub MoveCollectorToSplunkServer(strFolderSource)
 	WScript.Echo c
 	el = RunCommand(c)
 	If el <= 8 Then
-		WScript.Echo "MoveExportFolderToCollectorDc() SUCCESS"
+		WScript.Echo vbTab & "SUCCESS"
 	Else
-		WScript.Echo "MoveExportFolderToCollectorDc() ERROR: " & el
+		WScript.Echo vbTab & "ERROR: " & el
 	End If
 	
-	WScript.Echo "MoveCollectorToSplunkServer(): Move the " & EXTENSION_LPR
-	
+	WScript.Echo 
+	WScript.Echo vbTab & "Move the " & EXTENSION_LPR & " files."
+
 	c = "robocopy.exe "
 	c = c & Chr(34) & strFolderSource & Chr(34)
 	c = c & " " 
@@ -872,12 +897,12 @@ Sub MoveCollectorToSplunkServer(strFolderSource)
 	WScript.Echo c
 
 	el = RunCommand(c)
-	If el <= 8 Then
-		WScript.Echo "MoveExportFolderToCollectorDc() SUCCESS"
+		If el <= 8 Then
+		WScript.Echo vbTab & "SUCCESS"
 	Else
-		WScript.Echo "MoveExportFolderToCollectorDc() ERROR: " & el
+		WScript.Echo vbTab & "ERROR: " & el
 	End If
-End Sub '' of Sub MoveCollectorToSplunkServer
+End Sub '' of Sub MoveExportFolderToSplunkServer
 
 
 
@@ -887,6 +912,7 @@ Sub ProcessEventLog(ByVal strEventLog)
 	Dim		strPathExport
 	Dim		strPathLpr
 	Dim		strPathSkv
+	Dim		i
 	
 	dtmLastRun = LastRunGet(gstrComputerName, strEventLog)
 	dtmNow = LastRunPut(gstrComputerName, strEventLog)
@@ -901,36 +927,32 @@ Sub ProcessEventLog(ByVal strEventLog)
 	WScript.Echo "Path export LPR      : " & strPathLpr
 		
 	If ExportEventsUsingLogparser(gstrComputerName, dtmLastRun, dtmNow, strPathLpr) = LOGPARSER_OK Then
+		'' Build the path of the SKV file.
 		strPathSkv = Replace(strPathLpr, EXTENSION_LPR, EXTENSION_SKV)
-		If ConvertUsingLpr2skv(strPathLpr, strPathSkv) = 0 Then
 		
-			'' All DC's need to deliver their exports to the Collector DC
-			'If UCase(gstrComputerName) <> UCase(COLLECTOR_DC) Then 
-				'WScript.Echo "Move export files to the collector DC"
-				'Call MoveExportFolderToCollectorDc(strPathExport)
-			'End If
+		WScript.Echo "Conversion status = " & ConvertUsingLpr2skv(strPathLpr, strPathSkv)
 			
-			Call ExtractFilePerEvent(strPathExport & "\" & gstrComputerName, strPathLpr)
-			
-			If DoesShareExist(COLLECTOR_SHARE) = True Then
-				'' Actions that need to be done by the Collector DC
-				WScript.Echo "This is the Collector DC, found the " & COLLECTOR_SHARE & " share."
-				
-				Call MoveCollectorToSplunkServer(strPathExport)
-				
-			Else
-				'' Actions that need to be done by the 
-				WScript.Echo "This is not the Collector DC, move files to Collector DC " & COLLECTOR_DC
-				Call MoveExportFolderToCollectorDc(strPathExport)
-			End If
-
-			' If UCase(gstrComputerName) = UCase(COLLECTOR_DC) Then 
-				'WScript.Echo "Move Collector files to REC Splunk server"
-				 'Call MoveCollectorToSplunkServer(strPathExport)
-			' End If
-		Else
-			WScript.Echo "ERROR conversion!!"
+		'' Extract per event 1 file with a line.
+		Call ExtractFilePerEvent(strPathExport & "\" & gstrComputerName, strPathLpr)
+		
+		'' Check for file size of the strPathLpr, delete it when it contains no data (size = 0 bytes)
+		i = GetFileSize(strPathLpr)
+		WScript.Echo "Size of " & strPathLpr & "is " & i & " bytes."
+		If i = 0 Then
+			WScript.Echo "WARNING: File " & strPathLpr & " is a 0-file, delete the file."
+			Call DeleteFile(strPathLpr)
 		End If
+		
+		'' Check for file size of the strPathSkv, delete it when it contains no data (size = 0 bytes)
+		i = GetFileSize(strPathSkv)
+		If i = 0 Then
+		WScript.Echo "Size of " & strPathSkv & "is " & i & " bytes."
+			WScript.Echo "WARNING: File " & strPathSkv & " is a 0-file, delete the file."
+			Call DeleteFile(strPathSkv)
+		End If
+			
+		'' Move the exported and converted files to the Splunk server.
+		Call MoveExportFolderToSplunkServer(strPathExport)
 	Else
 		WScript.Echo "No export Logparser"
 	End If
@@ -940,22 +962,39 @@ End Sub '' of Sub ProcessEventLog
 
 
 Sub ScriptInit()
+	Set gobjFso = CreateObject("Scripting.FileSystemObject")
+	
+	'' Run some checks before starting with export and conversion.
 	If IsThisScriptAlreadyRunning() = True Then
 		WScript.Echo "WARNING: Another instance of this script is already running on this computer, stopping this instance!"
 		WScript.Quit(0)
 	End If
 
+	If Len(GetProgramPath("logparser.exe")) = 0 Then
+		WScript.Echo "ERROR: Could not find logparser.exe, stopping this instance!"
+		WScript.Quit(0)
+	End If
+
+	
 	If Len(GetProgramPath("robocopy.exe")) = 0 Then
-		WScript.Echo "WARNING: Could not find robocopy.exe, stopping this instance!"
+		WScript.Echo "ERROR: Could not find robocopy.exe, stopping this instance!"
 		WScript.Quit(0)
 	End If
 
 	If Len(GetProgramPath("lpr2skv.exe")) = 0 Then
-		WScript.Echo "WARNING: Could not find lpr2skv.exe, stopping this instance!"
+		WScript.Echo "ERROR: Could not find lpr2skv.exe, stopping this instance!"
 		WScript.Quit(0)
 	End If
 	
-	Set gobjFso = CreateObject("Scripting.FileSystemObject")
+	If gobjFSO.FolderExists(SHARE_LPR) = False Then
+		WScript.Echo "ERROR: Could not find the share " & SHARE_LPR & ", stopping this instance!"
+		WScript.Quit(0)
+	End If
+	
+	If gobjFSO.FolderExists(SHARE_SKV) = False Then
+		WScript.Echo "ERROR: Could not find the share " & SHARE_SKV & ", stopping this instance!"
+		WScript.Quit(0)
+	End If
 	
 	gstrComputerName = GetComputerName()
 End Sub '' of Sub ScriptInit
@@ -963,7 +1002,7 @@ End Sub '' of Sub ScriptInit
 
 
 Sub ScriptRun()
-	WScript.Echo "export-events.vbs started..."
+	WScript.Echo "Everthing jiffy, starting main ScriptRun()..."
 
 	'Call ExportEventsUsingLogparser("NS00DC011", "2015-04-08 12:00:00", "2015-04-08 12:30:00", "testfike-NS00DC011.lpr")
 	
