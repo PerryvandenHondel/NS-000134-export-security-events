@@ -18,6 +18,7 @@
 ''	VERSION:
 ''		03	2015-04-28	Modifications:
 ''						1) All servers can now directly contact the Splunk server using SMB shares. No need to use a collector dc anymore.
+''						2) Added file when running.
 ''		02	2015-04-14	Modification:
 ''						1) Do not export computer accounts, use LPR2SKV.EXE options --skip-computer-account
 ''		01	2015-04-08	First version
@@ -477,7 +478,7 @@ Function ExportEventsUsingLogparser(ByVal strComputer, ByVal dtmLastRun, ByVal d
 			intReturn = LOGPARSER_OK
 		Else
 			WScript.Echo "  WARNING: File " & strPathLogparser & " contains no data, deleting the this file"
-			''Call DeleteFile(strPathLogparser)
+			Call DeleteFile(strPathLogparser)
 			intReturn = LOGPARSER_FAIL
 		End If
 	Else
@@ -651,7 +652,12 @@ Sub DeleteFile(sPath)
    	
    	Set oFSO = CreateObject("Scripting.FileSystemObject")
    	If oFSO.FileExists(sPath) Then
-   		oFSO.DeleteFile sPath, True
+   		On Error Resume Next
+		oFSO.DeleteFile sPath, True
+		If Err.Number = 0 Then
+			WScript.Echo "INFO: Deleted " & sPath
+		End If
+		
    	End If
    	Set oFSO = Nothing
 End Sub '' DeleteFile
@@ -872,7 +878,14 @@ Sub MoveExportFolderToSplunkServer(strFolderSource)
 	c = c & " "
 	c = c & "*" & EXTENSION_SKV
 	c = c & " "
-	c = c & "/e /z /mov /r:9 /w:10 /np /copy:dt /log:robocopy-skv.log"
+	c = c & "/ts "
+	c = c & "/e "
+	c = c & "/z "
+	c = c & "/mov "
+	c = c & "/r:9 /w:10 "
+	c = c & "/np "
+	c = c & "/copy:dt "
+	c = c & "/log:robocopy-skv.log"
 	
 	WScript.Echo c
 	el = RunCommand(c)
@@ -913,12 +926,22 @@ Sub ProcessEventLog(ByVal strEventLog)
 	Dim		strPathLpr
 	Dim		strPathSkv
 	Dim		i
+	Dim		strUniqueFileName
+	Dim		strPathRunning
+	Dim		objFile
 	
 	dtmLastRun = LastRunGet(gstrComputerName, strEventLog)
 	dtmNow = LastRunPut(gstrComputerName, strEventLog)
 	
+	
+	strUniqueFileName = GetUniqueFileName(dtmLastRun)
+	
+	strPathRunning = GetScriptPath() & "\running-" & strUniqueFileName & ".log"
+	Set objFile = gobjFso.OpenTextFile(strPathRunning, FOR_WRITING, True)
+	objFile.WriteLine "RUNNING"
+	
 	strPathExport = GetScriptPath() & "\export"
-	strPathLpr = strPathExport & "\" & gstrComputerName & "\" & GetUniqueFileName(dtmLastRun) & EXTENSION_LPR
+	strPathLpr = strPathExport & "\" & gstrComputerName & "\" & strUniqueFileName & EXTENSION_LPR
 
 	WScript.Echo "Event Log            : " & strEventLog
 	WScript.Echo "Computer             : " & gstrComputerName
@@ -930,6 +953,7 @@ Sub ProcessEventLog(ByVal strEventLog)
 		'' Build the path of the SKV file.
 		strPathSkv = Replace(strPathLpr, EXTENSION_LPR, EXTENSION_SKV)
 		
+		WScript.Echo
 		WScript.Echo "Conversion status = " & ConvertUsingLpr2skv(strPathLpr, strPathSkv)
 			
 		'' Extract per event 1 file with a line.
@@ -937,7 +961,8 @@ Sub ProcessEventLog(ByVal strEventLog)
 		
 		'' Check for file size of the strPathLpr, delete it when it contains no data (size = 0 bytes)
 		i = GetFileSize(strPathLpr)
-		WScript.Echo "Size of " & strPathLpr & "is " & i & " bytes."
+		WScript.Echo 
+		WScript.Echo "Size of " & strPathLpr & " is " & i & " bytes."
 		If i = 0 Then
 			WScript.Echo "WARNING: File " & strPathLpr & " is a 0-file, delete the file."
 			Call DeleteFile(strPathLpr)
@@ -946,17 +971,23 @@ Sub ProcessEventLog(ByVal strEventLog)
 		'' Check for file size of the strPathSkv, delete it when it contains no data (size = 0 bytes)
 		i = GetFileSize(strPathSkv)
 		If i = 0 Then
-		WScript.Echo "Size of " & strPathSkv & "is " & i & " bytes."
-			WScript.Echo "WARNING: File " & strPathSkv & " is a 0-file, delete the file."
+		WScript.Echo
+		WScript.Echo "Size of " & strPathSkv & " is " & i & " bytes."
+			WScript.Echo "WARNING: File " & strPathSkv & " is a 0-file, deleting the file."
 			Call DeleteFile(strPathSkv)
 		End If
 			
 		'' Move the exported and converted files to the Splunk server.
 		Call MoveExportFolderToSplunkServer(strPathExport)
 	Else
+		WScript.Echo
 		WScript.Echo "No export Logparser"
 	End If
 	
+	objFile.Close
+	Set objFile = Nothing
+	
+	Call DeleteFile(strPathRunning)
 End Sub '' of Sub ProcessEventLog
 
 
@@ -1002,7 +1033,7 @@ End Sub '' of Sub ScriptInit
 
 
 Sub ScriptRun()
-	WScript.Echo "Everthing jiffy, starting main ScriptRun()..."
+	WScript.Echo "Everything jiffy, starting main ScriptRun()..."
 
 	'Call ExportEventsUsingLogparser("NS00DC011", "2015-04-08 12:00:00", "2015-04-08 12:30:00", "testfike-NS00DC011.lpr")
 	
